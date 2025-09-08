@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI 모의면접 - 오디오 분석(리브로사) 단독 테스트</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      :root {
+        --bg: #0b1220;
+        --card: #121a2b;
+        --muted: #8aa0c6;
+        --text: #e7efff;
+        --acc: #6ea8fe;
+        --ok: #2ecc71;
+        --warn: #f1c40f;
+        --bad: #e74c3c;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 32px auto;
+        padding: 0 16px;
+      }
+      h1 {
+        font-size: 22px;
+        margin: 0 0 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 16px;
+        padding: 16px;
+        margin: 16px 0;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .btn {
+        background: #1b2a44;
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 10px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .btn[disabled] {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .q {
+        font-weight: 600;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .meter {
+        height: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .meter > div {
+        height: 100%;
+        background: linear-gradient(90deg, var(--acc), #8bd0ff);
+        width: 0%;
+        transition: width 0.4s ease;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 6px 10px;
+        margin-top: 10px;
+      }
+      code {
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        margin-left: 6px;
+      }
+      .good {
+        background: rgba(46, 204, 113, 0.15);
+        color: var(--ok);
+        border: 1px solid rgba(46, 204, 113, 0.35);
+      }
+      .avg {
+        background: rgba(241, 196, 15, 0.15);
+        color: var(--warn);
+        border: 1px solid rgba(241, 196, 15, 0.35);
+      }
+      .bad {
+        background: rgba(231, 76, 60, 0.15);
+        color: var(--bad);
+        border: 1px solid rgba(231, 76, 60, 0.35);
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      audio {
+        width: 100%;
+        margin-top: 8px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+      }
+      @media (max-width: 760px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>오디오 분석(리브로사) 단독 테스트</h1>
+      <div class="card">
+        <div class="kv">
+          <div>오디오 API</div>
+          <div><code id="apiBase"></code></div>
+          <div>설명</div>
+          <div class="hint">
+            두 문항만 진행합니다. 녹음은 브라우저에서 WAV로 인코딩되어 오디오
+            분석 서버(<code>/audio/analyze</code>)로 전송됩니다.
+          </div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card" id="q1">
+          <div class="q">질문 1: 자기소개를 해주세요.</div>
+          <div class="row">
+            <button class="btn" id="rec1Start">녹음 시작</button>
+            <button class="btn" id="rec1Stop" disabled>녹음 종료 & 분석</button>
+          </div>
+          <div class="meter" style="margin: 12px 0"><div id="mtr1"></div></div>
+          <audio id="aud1" controls></audio>
+          <div id="res1"></div>
+        </div>
+
+        <div class="card" id="q2">
+          <div class="q">질문 2: 지원동기를 말씀해주세요.</div>
+          <div class="row">
+            <button class="btn" id="rec2Start" disabled>녹음 시작</button>
+            <button class="btn" id="rec2Stop" disabled>녹음 종료 & 분석</button>
+          </div>
+          <div class="meter" style="margin: 12px 0"><div id="mtr2"></div></div>
+          <audio id="aud2" controls></audio>
+          <div id="res2"></div>
+        </div>
+      </div>
+
+      <div class="card" id="summary">
+        <div class="q">종합 리포트</div>
+        <div class="row">
+          <button class="btn" id="showSummary" disabled>종합 결과 보기</button>
+        </div>
+        <div id="sumRes"></div>
+      </div>
+
+      <div class="card">
+        <div class="q">주의사항</div>
+        <ul class="hint">
+          <li>
+            말 빠르기 지표는 **침묵 비율(silence_ratio)** 기반의 프록시(발화
+            비율)로 근사합니다.
+          </li>
+          <li>
+            “목소리 떨림”은 jitter_like / shimmer_like / RMS 변동(rms_cv)을
+            합성한 간단 점수입니다(의학적 정의와 다름).
+          </li>
+          <li>리브로사 서버는 기본 샘플레이트 16kHz로 분석합니다.</li>
+        </ul>
+      </div>
+    </div>
+
+    <script>
+      /*** ======= 설정 ======= ***/
+      const AUDIO_API_BASE = "http://localhost:8081"; // ← 당신의 오디오 분석 서버 주소로 변경
+      document.getElementById("apiBase").textContent = AUDIO_API_BASE;
+
+      /*** ======= 간단 WAV 인코더(16-bit PCM) ======= ***/
+      // ScriptProcessor로 모노 PCM 수집 → 16bit PCM → WAV
+      class WavRecorder {
+        constructor(meterEl) {
+          this.meterEl = meterEl;
+          this.audioCtx = null;
+          this.stream = null;
+          this.input = null;
+          this.processor = null;
+          this.buffers = [];
+          this.recording = false;
+        }
+        async start() {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          this.audioCtx = new (window.AudioContext ||
+            window.webkitAudioContext)();
+          const source = this.audioCtx.createMediaStreamSource(this.stream);
+          const processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
+          source.connect(processor);
+          processor.connect(this.audioCtx.destination);
+          this.input = source;
+          this.processor = processor;
+          this.buffers = [];
+          this.recording = true;
+
+          const analyser = this.audioCtx.createAnalyser();
+          analyser.fftSize = 2048;
+          source.connect(analyser);
+          const pcm = new Float32Array(4096);
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+          processor.onaudioprocess = (e) => {
+            if (!this.recording) return;
+            const chan = e.inputBuffer.getChannelData(0);
+            this.buffers.push(new Float32Array(chan));
+            // 레벨 미터 업데이트
+            analyser.getByteTimeDomainData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              const v = (dataArray[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / dataArray.length);
+            const pct = Math.min(100, Math.max(0, rms * 180));
+            if (this.meterEl) this.meterEl.style.width = pct + "%";
+          };
+        }
+        async stop() {
+          this.recording = false;
+          if (this.processor) this.processor.disconnect();
+          if (this.input) this.input.disconnect();
+          if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+          const wav = encodeWAV(
+            this._merge(),
+            this.audioCtx.sampleRate || 44100
+          );
+          if (this.audioCtx) await this.audioCtx.close();
+          return wav;
+        }
+        _merge() {
+          // Float32Array[] → Float32Array
+          const length = this.buffers.reduce((a, b) => a + b.length, 0);
+          const out = new Float32Array(length);
+          let offset = 0;
+          for (const b of this.buffers) {
+            out.set(b, offset);
+            offset += b.length;
+          }
+          return out;
+        }
+      }
+      function encodeWAV(samples, sampleRate) {
+        // 16-bit PCM mono
+        const buffer = new ArrayBuffer(44 + samples.length * 2);
+        const view = new DataView(buffer);
+
+        writeString(view, 0, "RIFF");
+        view.setUint32(4, 36 + samples.length * 2, true);
+        writeString(view, 8, "WAVE");
+        writeString(view, 12, "fmt ");
+        view.setUint32(16, 16, true); // PCM
+        view.setUint16(20, 1, true); // linear PCM
+        view.setUint16(22, 1, true); // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true); // byte align
+        view.setUint16(34, 16, true); // bits
+        writeString(view, 36, "data");
+        view.setUint32(40, samples.length * 2, true);
+        floatTo16BitPCM(view, 44, samples);
+        return new Blob([view], { type: "audio/wav" });
+      }
+      function writeString(view, offset, str) {
+        for (let i = 0; i < str.length; i++)
+          view.setUint8(offset + i, str.charCodeAt(i));
+      }
+      function floatTo16BitPCM(view, offset, input) {
+        for (let i = 0; i < input.length; i++, offset += 2) {
+          let s = Math.max(-1, Math.min(1, input[i]));
+          s = s < 0 ? s * 0x8000 : s * 0x7fff;
+          view.setInt16(offset, s, true);
+        }
+      }
+
+      /*** ======= 업로드 & 리포트 렌더링 ======= ***/
+      async function analyzeBlob(blob, filename = "audio.wav") {
+        const fd = new FormData();
+        fd.append("file", blob, filename);
+        const res = await fetch(`${AUDIO_API_BASE}/audio/analyze`, {
+          method: "POST",
+          body: fd,
+        });
+        if (!res.ok) throw new Error("분석 요청 실패");
+        const json = await res.json();
+        return json.features;
+      }
+
+      function rateTag(score) {
+        const span = document.createElement("span");
+        span.className =
+          "tag " + (score >= 70 ? "good" : score >= 40 ? "avg" : "bad");
+        span.textContent =
+          score >= 70 ? "좋음" : score >= 40 ? "보통" : "개선필요";
+        return span;
+      }
+
+      // 점수 스케일러(경험적)
+      function clamp01(x) {
+        return Math.max(0, Math.min(1, x));
+      }
+      // 톤 안정성: 세미톤 표준편차(강건, MAD기반) 낮을수록 안정
+      // 0.15 st → 100점, 0.9 st → 0점 (경험적; 필요 시 조정)
+      function scoreToneStabilitySemitone(f0_std_st) {
+        const lo = 0.15,
+          hi = 0.9;
+        const t = Math.min(1, Math.max(0, (f0_std_st - lo) / (hi - lo)));
+        return Math.round((1 - t) * 100);
+      }
+
+      function scoreToneStabilityCV(f0_cv) {
+        const lo = 0.05,
+          hi = 0.3; // 5%~30% 범위를 100→0으로 매핑
+        const t = Math.min(1, Math.max(0, (f0_cv - lo) / (hi - lo)));
+        return Math.round((1 - t) * 100);
+      }
+
+      function scoreTone(features) {
+        const st = Number(features.f0_std_semitone);
+        if (Number.isFinite(st) && st > 0)
+          return scoreToneStabilitySemitone(st);
+        const cv = Number(features.f0_cv);
+        if (Number.isFinite(cv) && cv > 0) return scoreToneStabilityCV(cv);
+        // 최후 폴백: f0_std (0→100, 120Hz→0)
+        const std = Number(features.f0_std) || 0;
+        const t = Math.min(1, std / 120);
+        return Math.round((1 - t) * 100);
+      }
+
+      // 기존 진동/말빠르기 스케일은 이전 답변의 완화 버전 유지 권장
+      function scoreVibrato(jitter, shimmer, rms_cv) {
+        const nj = Math.min(1, jitter / 1.0);
+        const ns = Math.min(1, shimmer / 1.0);
+        const nr = Math.min(1, rms_cv / 2.0);
+        const bad = nj * 0.4 + ns * 0.4 + nr * 0.2;
+        return Math.round((1 - bad) * 100);
+      }
+
+      function scorePace(silenceRatio) {
+        const talk = 1 - silenceRatio;
+        const target = 0.6;
+        const err = Math.abs(talk - target) / target;
+        return Math.round((1 - Math.min(1, err)) * 100);
+      }
+
+      // 렌더 함수에서 사용값 선택
+      function renderResult(container, features) {
+        const {
+          f0_mean,
+          f0_std,
+          f0_cv,
+          f0_std_semitone,
+          rms_std,
+          rms_cv,
+          jitter_like,
+          shimmer_like,
+          silence_ratio,
+          sr,
+        } = features;
+
+        // 톤 안정성은 세미톤 표준편차를 우선 사용, 없으면 CV 사용
+        const tone = scoreTone(features);
+
+        const vibrato = scoreVibrato(jitter_like, shimmer_like, rms_cv);
+        const pace = scorePace(silence_ratio);
+
+        container.innerHTML = `
+    <div class="kv">
+      <div>안정적인 톤</div><div>${tone}점 ${rateTag(tone).outerHTML}</div>
+      <div>목소리 떨림</div><div>${vibrato}점 ${
+          rateTag(vibrato).outerHTML
+        }</div>
+      <div>말 빠르기(프록시)</div><div>${pace}점 ${
+          rateTag(pace).outerHTML
+        }</div>
+
+      <div style="grid-column:1 / span 2; margin-top:8px; color:var(--muted);">원시 지표</div>
+      <div>f0_mean</div><div>${f0_mean?.toFixed(1)} Hz</div>
+      <div>f0_std</div><div>${f0_std?.toFixed(2)} Hz</div>
+      <div>f0_cv</div><div>${f0_cv?.toFixed(4)}</div>
+      <div>f0_std_semitone</div><div>${f0_std_semitone?.toFixed(3)} st</div>
+      <div>rms_std</div><div>${rms_std?.toFixed(4)}</div>
+      <div>rms_cv</div><div>${rms_cv?.toFixed(4)}</div>
+      <div>jitter_like</div><div>${jitter_like?.toExponential(3)}</div>
+      <div>shimmer_like</div><div>${shimmer_like?.toExponential(3)}</div>
+      <div>silence_ratio</div><div>${(silence_ratio * 100).toFixed(1)}%</div>
+      <div>sample rate</div><div>${sr} Hz</div>
+    </div>
+  `;
+
+        container.querySelectorAll(".tag").forEach((el) => {
+          el.outerHTML = el.outerHTML;
+        });
+        return { tone, vibrato, pace };
+      }
+
+      /*** ======= 흐름 제어 ======= ***/
+      let rec1,
+        rec2,
+        scores1 = null,
+        scores2 = null;
+
+      const m1 = document.getElementById("mtr1");
+      const m2 = document.getElementById("mtr2");
+
+      const btn1Start = document.getElementById("rec1Start");
+      const btn1Stop = document.getElementById("rec1Stop");
+      const btn2Start = document.getElementById("rec2Start");
+      const btn2Stop = document.getElementById("rec2Stop");
+      const showSummary = document.getElementById("showSummary");
+
+      btn1Start.onclick = async () => {
+        btn1Start.disabled = true;
+        btn1Stop.disabled = false;
+        rec1 = new WavRecorder(m1);
+        await rec1.start();
+      };
+      btn1Stop.onclick = async () => {
+        btn1Stop.disabled = true;
+        const blob = await rec1.stop();
+        document.getElementById("aud1").src = URL.createObjectURL(blob);
+        const features = await analyzeBlob(blob, "q1.wav");
+        scores1 = renderResult(document.getElementById("res1"), features);
+        btn2Start.disabled = false; // 다음 문항 활성화
+      };
+
+      btn2Start.onclick = async () => {
+        btn2Start.disabled = true;
+        btn2Stop.disabled = false;
+        rec2 = new WavRecorder(m2);
+        await rec2.start();
+      };
+      btn2Stop.onclick = async () => {
+        btn2Stop.disabled = true;
+        const blob = await rec2.stop();
+        document.getElementById("aud2").src = URL.createObjectURL(blob);
+        const features = await analyzeBlob(blob, "q2.wav");
+        scores2 = renderResult(document.getElementById("res2"), features);
+        showSummary.disabled = false;
+      };
+
+      showSummary.onclick = () => {
+        if (!scores1 || !scores2) return;
+        const tone = Math.round((scores1.tone + scores2.tone) / 2);
+        const vibrato = Math.round((scores1.vibrato + scores2.vibrato) / 2);
+        const pace = Math.round((scores1.pace + scores2.pace) / 2);
+
+        document.getElementById("sumRes").innerHTML = `
+    <div class="kv">
+      <div>종합 톤 안정성</div><div>${tone}점 ${rateTag(tone).outerHTML}</div>
+      <div>종합 목소리 떨림</div><div>${vibrato}점 ${
+          rateTag(vibrato).outerHTML
+        }</div>
+      <div>종합 말 빠르기(프록시)</div><div>${pace}점 ${
+          rateTag(pace).outerHTML
+        }</div>
+    </div>
+  `;
+      };
+    </script>
+  </body>
+</html>
