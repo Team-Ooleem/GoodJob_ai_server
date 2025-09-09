@@ -4,11 +4,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.audio_analysis import router as audio_router
+from app.routers.avatar import router as avatar_router
 
-origins = ["*"]  # 나중에 프론트엔드 서버로 변경해야함
+origins = ["https://localhost:3443"]  # 나중에 프론트엔드 서버로 변경해야함
 
 app = FastAPI(title="Audio Analysis Service")
 app.include_router(audio_router)
+app.include_router(avatar_router)
 
 app.add_middleware(
     CORSMiddleware,

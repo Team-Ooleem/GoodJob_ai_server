@@ -5,6 +5,9 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libsndfile1 \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -18,7 +21,13 @@ COPY app ./app
 # COPY static ./static
 
 # 환경 변수 (선택)
-ENV PORT=8081
+ENV PORT=8081 \
+    BACKEND=mock \
+    MEDIA_ROOT=/data
+
+# 데이터 디렉터리
+RUN mkdir -p /data
+VOLUME ["/data"]
 
 # 네트워크
 EXPOSE 8081
