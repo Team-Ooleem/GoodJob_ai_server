@@ -6,7 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.audio_analysis import router as audio_router
 from app.routers.avatar import router as avatar_router
 
-origins = ["https://localhost:3443"]  # 나중에 프론트엔드 서버로 변경해야함
+origins = [
+    "https://good-job.shop",
+    "https://ai.good-job.shop", 
+    "https://appi.good-job.shop",
+    "https://localhost:3443",  # 개발 환경용
+    "http://localhost:3000",   # 개발 환경용
+    "http://localhost:8080",   # 개발 환경용
+]
 
 app = FastAPI(title="Audio Analysis Service")
 app.include_router(audio_router)
