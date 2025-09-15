@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers.speaker_diarization import router as diarization_router
 
 from app.routers.audio_analysis import router as audio_router
 from app.routers.avatar import router as avatar_router
@@ -18,6 +19,7 @@ origins = [
 app = FastAPI(title="Audio Analysis Service")
 app.include_router(audio_router)
 app.include_router(avatar_router)
+app.include_router(diarization_router)
 
 app.add_middleware(
     CORSMiddleware,
