@@ -150,8 +150,16 @@ class SpeakerDiarizer:
             return filtered_intervals
             
         except Exception as e:
-            print(f"❌ fallback 화자분리 실패: {e}")
-            return []
+            print(f"❌ 화자분리 실패: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "speaker_count": 0,        # ✅ 추가
+            "total_duration": 0.0,     # ✅ 추가
+            "segments": [],            # ✅ 추가
+            "timestamp": datetime.now().isoformat(),
+            "processing_method": "pyannote"  # ✅ 추가
+        }
     
     def _extract_speaker_number(self, speaker_id: str) -> int:
         """화자 ID에서 숫자 추출"""
@@ -194,8 +202,16 @@ class SpeakerDiarizer:
                     os.unlink(audio_path)
                     
         except Exception as e:
-            print(f"❌ diarize_audio 실패: {e}")
-            return []
+            print(f"❌ 화자분리 실패: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "speaker_count": 0,        # ✅ 추가
+            "total_duration": 0.0,     # ✅ 추가
+            "segments": [],            # ✅ 추가
+            "timestamp": datetime.now().isoformat(),
+            "processing_method": "pyannote"  # ✅ 추가
+        }
 
     def extract_audio_segment(self, audio_data: bytes, start_time: float, end_time: float) -> bytes:
         """
@@ -217,7 +233,11 @@ class SpeakerDiarizer:
             
             # WAV 형식으로 변환하여 버퍼 반환
             output_io = io.BytesIO()
-            segment.export(output_io, format="wav")
+            segment.export(output_io, format="wav", parameters=[
+               "-ar", "16000",      # 16kHz 샘플레이트
+               "-ac", "1",          # 모노 (1채널)
+               "-sample_fmt", "s16" # 16비트 샘플 포맷
+               ])
             
             return output_io.getvalue()
             
@@ -270,13 +290,18 @@ def process_audio_pipeline(audio_path: str,
         
         print(f"✅ 화자분리 완료: {speaker_count}명 화자, {total_duration:.1f}초")
         return result
-        
+    
+    
     except Exception as e:
         print(f"❌ 화자분리 실패: {e}")
         return {
             "success": False,
             "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            "speaker_count": 0,        # ✅ 추가
+            "total_duration": 0.0,     # ✅ 추가
+            "segments": [],            # ✅ 추가
+            "timestamp": datetime.now().isoformat(),
+            "processing_method": "pyannote"  # ✅ 추가
         }
 
 

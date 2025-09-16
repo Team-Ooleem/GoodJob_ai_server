@@ -51,9 +51,10 @@ async def analyze_speakers(request: DiarizationRequest):
             audio_path = tmp.name
         
         try:
-            # 3. Hugging Face 토큰
-            token = os.getenv("HF_TOKEN", "your_token_here")
-            
+            token = os.getenv("HF_TOKEN")
+            if not token:
+                print("⚠️ HF_TOKEN이 설정되지 않았습니다. fallback 모드로 실행됩니다.")
+                token = ""
             # 4. 화자분리만 실행
             results = process_audio_pipeline(
                 audio_path,
