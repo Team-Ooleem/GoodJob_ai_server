@@ -8,6 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
     libxext6 \
+    # pyannote용 추가 라이브러리
+    libsox-dev \
+    libsox-fmt-all \
+    sox \
+    portaudio19-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -20,7 +25,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 # COPY static ./static
 
-# 환경 변수 (선택)
+# 환경 변수 (민감한 정보는 제외)
 ENV PORT=8081 \
     BACKEND=mock \
     MEDIA_ROOT=/data
