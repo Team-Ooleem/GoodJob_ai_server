@@ -89,6 +89,9 @@ def analyze_audio(path: str, sr_target: int = 16000):
         st_med = np.nanmedian(st_win)
         mad_st = np.nanmedian(np.abs(st_win - st_med))
         f0_std_semitone = float(mad_st * 1.4826)
+        # robust 중심/분산(참고용)
+        f0_median_hz = float(f0_center)
+        f0_mad_semitone = float(mad_st)
 
         # Hz 지표(유성 구간 기준)
         f0_mean = float(np.nanmean(f0_smooth))
@@ -97,6 +100,8 @@ def analyze_audio(path: str, sr_target: int = 16000):
     else:
         f0_mean = f0_std = f0_cv = 0.0
         f0_std_semitone = 0.0
+        f0_median_hz = 0.0
+        f0_mad_semitone = 0.0
 
     # ---- 2) 에너지/무성 ----
     frame_length = 1024
@@ -124,13 +129,29 @@ def analyze_audio(path: str, sr_target: int = 16000):
 
     # 준-지터/쉬머 (간이 프록시)
     # jitter: 주기 T=1/f0 기반 정의에 근접
+    jitter_like_mad = 0.0
+    jitter_like_sigma_robust = 0.0
     if f0_v.size > 3:
         T = 1.0 / np.maximum(f0_v, 1e-8)
         jitter_like = float(np.std(np.diff(T)) / (np.mean(T) + 1e-8))
+        # robust jitter (MAD 기반)
+        try:
+            T_med = float(np.nanmedian(T))
+            D = np.diff(T)
+            if D.size:
+                D_med = float(np.nanmedian(D))
+                mad_D = float(np.nanmedian(np.abs(D - D_med)))
+                jitter_like_mad = float(mad_D / (T_med + 1e-8)) if T_med > 0 else 0.0
+                jitter_like_sigma_robust = float(1.4826 * jitter_like_mad)
+        except Exception:
+            jitter_like_mad = 0.0
+            jitter_like_sigma_robust = 0.0
     else:
         jitter_like = 0.0
 
     frames = librosa.util.frame(y, frame_length=frame_length, hop_length=hop_length)
+    shimmer_like_mad = 0.0
+    shimmer_like_sigma_robust = 0.0
     if frames.size:
         # shimmer: voiced-only RMS envelope 기반 변동(프록시)
         if rms.size and mask.size:
@@ -141,6 +162,19 @@ def analyze_audio(path: str, sr_target: int = 16000):
                 shimmer_like = float(
                     np.std(np.diff(rms_voiced2)) / (np.mean(rms_voiced2) + 1e-8)
                 )
+                # robust shimmer (voiced RMS 기반)
+                try:
+                    R = rms_voiced2
+                    R_med = float(np.nanmedian(R))
+                    DR = np.diff(R)
+                    if DR.size:
+                        DR_med = float(np.nanmedian(DR))
+                        mad_DR = float(np.nanmedian(np.abs(DR - DR_med)))
+                        shimmer_like_mad = float(mad_DR / (R_med + 1e-8)) if R_med > 0 else 0.0
+                        shimmer_like_sigma_robust = float(1.4826 * shimmer_like_mad)
+                except Exception:
+                    shimmer_like_mad = 0.0
+                    shimmer_like_sigma_robust = 0.0
             else:
                 shimmer_like = 0.0
         else:
@@ -151,8 +185,24 @@ def analyze_audio(path: str, sr_target: int = 16000):
                 if peaks.size > 3
                 else 0.0
             )
+            # robust shimmer (피크 기반)
+            try:
+                P = peaks
+                if P.size:
+                    P_med = float(np.nanmedian(P))
+                    DP = np.diff(P)
+                    if DP.size:
+                        DP_med = float(np.nanmedian(DP))
+                        mad_DP = float(np.nanmedian(np.abs(DP - DP_med)))
+                        shimmer_like_mad = float(mad_DP / (P_med + 1e-8)) if P_med > 0 else 0.0
+                        shimmer_like_sigma_robust = float(1.4826 * shimmer_like_mad)
+            except Exception:
+                shimmer_like_mad = 0.0
+                shimmer_like_sigma_robust = 0.0
     else:
         shimmer_like = 0.0
+        shimmer_like_mad = 0.0
+        shimmer_like_sigma_robust = 0.0
 
     # 침묵 비율 (두 임계값 비교: 30dB, 50dB)
     intervals_30 = librosa.effects.split(y, top_db=30)
@@ -200,12 +250,19 @@ def analyze_audio(path: str, sr_target: int = 16000):
         "f0_std": f0_std,
         "f0_cv": f0_cv,
         "f0_std_semitone": f0_std_semitone,  # ← 강건(=MAD 기반) 세미톤 표준편차
+        # f0 robust 참고 지표
+        "f0_median_hz": f0_median_hz,
+        "f0_mad_semitone": f0_mad_semitone,
         "rms_std": rms_std,
         "rms_cv": rms_cv,
         "rms_cv_voiced": rms_cv_voiced,
         "rms_db_std_voiced": rms_db_std_voiced,
         "jitter_like": jitter_like,
+        "jitter_like_mad": jitter_like_mad,
+        "jitter_like_sigma_robust": jitter_like_sigma_robust,
         "shimmer_like": shimmer_like,
+        "shimmer_like_mad": shimmer_like_mad,
+        "shimmer_like_sigma_robust": shimmer_like_sigma_robust,
         "silence_ratio": silence_ratio,
         "silence_ratio_db50": silence_ratio_db50,
         "voiced_ratio": voiced_ratio,
