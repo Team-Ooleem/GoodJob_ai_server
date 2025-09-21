@@ -1,14 +1,29 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from app.core.speaker_diarization import process_audio_pipeline
+from app.core.speaker_diarization import process_audio_pipeline, SpeakerDiarizer, download_audio_from_gcs
 import tempfile
 import requests
 import os
 import base64
-from app.core.speaker_diarization import SpeakerDiarizer, download_audio_from_gcs
 from datetime import datetime
 
 router = APIRouter(prefix="/diarization", tags=["diarization"])
+
+# 🚀 전역 diarizer 인스턴스 캐싱 (메모리 효율성)
+_diarizer_instance = None
+
+def get_diarizer(token: str = None) -> SpeakerDiarizer:
+    """diarizer 인스턴스 재사용 (메모리 최적화)"""
+    global _diarizer_instance
+    
+    if _diarizer_instance is None:
+        token = token or os.getenv("HF_TOKEN", "")  # 🚀 간단하게
+        _diarizer_instance = SpeakerDiarizer(token=token)
+        print("🚀 새 diarizer 인스턴스 생성")
+    else:
+        print("♻️ 기존 diarizer 인스턴스 재사용")
+    
+    return _diarizer_instance
 
 class DiarizationRequest(BaseModel):
     audio_url: str
@@ -29,19 +44,12 @@ async def test():
 
 @router.post("/analyze", response_model=DiarizationResponse)
 async def analyze_speakers(request: DiarizationRequest):
-    """
-    GCS URL에서 화자분리만 수행
-    
-    Args:
-        request: 오디오 URL 및 설정
-        
-    Returns:
-        화자분리 결과
-    """
+    """GCS URL에서 화자분리만 수행"""
     try:
-        # 1. GCS에서 오디오 다운로드
-        print(f"🎵 GCS에서 오디오 다운로드: {request.audio_url}")
-        response = requests.get(request.audio_url, timeout=300)
+        print(f"🎵 화자분리 분석 시작: {request.audio_url}")
+        
+        # 1. GCS에서 오디오 다운로드 (타임아웃 증가)
+        response = requests.get(request.audio_url, timeout=600)  # 10분
         response.raise_for_status()
         
         # 2. 임시 파일로 저장
@@ -51,11 +59,12 @@ async def analyze_speakers(request: DiarizationRequest):
             audio_path = tmp.name
         
         try:
-            token = os.getenv("HF_TOKEN")
+            # 3. 환경변수에서 토큰 가져오기
+            token = os.getenv("HF_TOKEN", "")
             if not token:
                 print("⚠️ HF_TOKEN이 설정되지 않았습니다. fallback 모드로 실행됩니다.")
-                token = ""
-            # 4. 화자분리만 실행
+            
+            # 4. 화자분리 실행
             results = process_audio_pipeline(
                 audio_path,
                 token=token,
@@ -63,27 +72,20 @@ async def analyze_speakers(request: DiarizationRequest):
                 max_speakers=request.max_speakers
             )
             
-            # 5. 응답 형식 맞추기
+            # 5. 응답 반환
             if results.get("success", False):
-                return DiarizationResponse(
-                    success=True,
-                    speaker_count=results.get("speaker_count", 0),
-                    total_duration=results.get("total_duration", 0.0),
-                    segments=results.get("segments", []),
-                    timestamp=results.get("timestamp", ""),
-                    processing_method=results.get("processing_method", "unknown")
-                )
+                return DiarizationResponse(**results)
             else:
                 raise HTTPException(status_code=500, detail=results.get("error", "화자분리 실패"))
             
         finally:
-            # 6. 임시 파일 삭제
+            # 6. 임시 파일 정리
             if os.path.exists(audio_path):
                 os.unlink(audio_path)
                 
     except Exception as e:
+        print(f"❌ 화자분리 분석 실패: {e}")
         raise HTTPException(status_code=500, detail=f"화자분리 처리 중 오류 발생: {str(e)}")
-
 
 @router.post("/get-segments-from-gcs", response_model=DiarizationResponse)
 async def get_segments_from_gcs(
@@ -95,26 +97,28 @@ async def get_segments_from_gcs(
     session_start_offset: float = Form(default=0.0)
 ):
     try:
-        print(f"�� pynote GCS 세그먼트 분리 시작: {gcs_url}")
+        print(f"🎯 pyannote GCS 세그먼트 분리 시작")
         print(f"📋 멘토 ID: {mentor_idx}, 멘티 ID: {mentee_idx}")
         
         # 1. GCS에서 오디오 다운로드
         audio_data = download_audio_from_gcs(gcs_url)
-        print(f"✅ GCS 다운로드 완료: {len(audio_data)} bytes")
+        print(f"✅ GCS 다운로드 완료: {len(audio_data) / (1024*1024):.1f}MB")
         
-        # 2. pyannote로 화자분리
-        diarizer = SpeakerDiarizer(token=token)
+        # 2. 재사용 가능한 diarizer 인스턴스 사용
+        diarizer = get_diarizer(token)
         segments = diarizer.diarize_audio(audio_data)
-        print(f"�� 화자분리 완료: {len(segments)}개 세그먼트")
+        print(f"🎤 화자분리 완료: {len(segments)}개 세그먼트")
         
-        # 🆕 3. 멘토/멘티 정보를 활용한 정확한 매핑
+        # 3. 멘토/멘티 매핑
         mapped_segments = diarizer.map_speakers_to_mentor_mentee(
             segments, mentor_idx, mentee_idx
         )
-        print(f"�� 스피커 매핑 완료: {len(mapped_segments)}개 세그먼트")
+        print(f"🔄 스피커 매핑 완료: {len(mapped_segments)}개 세그먼트")
         
         # 4. 세그먼트별 오디오 추출
         segment_buffers = []
+        total_segments = len(mapped_segments)
+        
         for i, segment in enumerate(mapped_segments):
             try:
                 audio_buffer = diarizer.extract_audio_segment(
@@ -125,18 +129,24 @@ async def get_segments_from_gcs(
                 
                 segment_buffers.append({
                     'audioBuffer': base64.b64encode(audio_buffer).decode('utf-8'),
-                    'startTime': segment['start_time'],
-                    'endTime': segment['end_time'],
+                    'startTime': round(segment['start_time'], 2),  # 🚀 precision 최적화
+                    'endTime': round(segment['end_time'], 2),
                     'speakerTag': segment['speaker_tag']  # 0=멘토(김코치), 1=멘티(이멘티)
                 })
                 
-                print(f"✅ 세그먼트 {i+1} 처리 완료: {segment['start_time']:.1f}s-{segment['end_time']:.1f}s, 화자: {segment['speaker_tag']}")
+                # 🚀 진행률 표시 개선 (10% 단위)
+                progress_step = max(1, total_segments // 10)
+                if (i + 1) % progress_step == 0 or i == total_segments - 1:
+                    print(f"📊 진행률: {i+1}/{total_segments} ({((i+1)/total_segments*100):.1f}%)")
                 
             except Exception as segment_error:
                 print(f"❌ 세그먼트 {i+1} 처리 실패: {segment_error}")
                 continue
         
-        print(f"�� 전체 처리 완료: {len(segment_buffers)}개 세그먼트 반환")
+        # 🚀 메모리 정리
+        del audio_data
+        
+        print(f"✅ 전체 처리 완료: {len(segment_buffers)}개 세그먼트")
         
         return {
             "success": True,
@@ -144,11 +154,11 @@ async def get_segments_from_gcs(
             "total_duration": max(seg['endTime'] for seg in segment_buffers) if segment_buffers else 0.0,
             "segments": segment_buffers,
             "timestamp": datetime.now().isoformat(),
-            "processing_method": "accurate_mentor_mentee_mapping"
+            "processing_method": "optimized_mentor_mentee_mapping"
         }
         
     except Exception as e:
-        print(f"❌ pynote 처리 실패: {e}")
+        print(f"❌ pyannote 처리 실패: {e}")
         return {
             "success": False,
             "error": str(e),
