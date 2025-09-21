@@ -28,7 +28,13 @@ COPY app ./app
 # 환경 변수 (민감한 정보는 제외)
 ENV PORT=8081 \
     BACKEND=mock \
-    MEDIA_ROOT=/data
+    MEDIA_ROOT=/data \
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4 \
+    OPENBLAS_NUM_THREADS=4 \
+    PYTHONUNBUFFERED=1 \
+    TORCH_NUM_THREADS=4 \
+    TORCH_INTEROP_THREADS=1
 
 # 데이터 디렉터리
 RUN mkdir -p /data

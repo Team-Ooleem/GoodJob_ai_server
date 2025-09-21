@@ -1,4 +1,5 @@
 import numpy as np
+import threading
 import librosa
 import torch
 from typing import List, Dict, Tuple, Optional
@@ -12,6 +13,7 @@ import io
 import base64  
 import requests
 from fastapi import HTTPException
+from typing import Optional
 
 try:
     from pyannote.audio import Pipeline
@@ -27,6 +29,18 @@ from pydub import AudioSegment
 class SpeakerDiarizer:
     """화자분리 전용 클래스"""
     
+    _instance : Optional['SpeakerDiarizer'] = None
+    _lock: threading.Lock = threading.Lock()
+    _initialized = False
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    
     def __init__(self, 
                  token: str = "",
                  min_speakers: int = 1, 
@@ -36,7 +50,10 @@ class SpeakerDiarizer:
                  min_duration_on: float = 1.0,      # 최소 발화 시간     
                  min_duration_off: float = 0.5,     # 최소 침묵 시간     
                  merge_threshold: float = 2.0):     # 짧은 세그먼트 병합 임계값
-
+        
+        if self._initialized:
+            return
+        
         self.token = token
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
@@ -58,6 +75,15 @@ class SpeakerDiarizer:
             except Exception as e:
                 print(f"❌ pyannote 파이프라인 로드 실패: {e}")
                 self.use_pyannote = False
+        self._initialized = True
+        print("✅ SpeakerDiarizer 초기화 완료!")
+        
+    @classmethod
+    def get_instance(cls, *args, **kwargs) -> 'SpeakerDiarizer':
+        if cls._instance is None:
+            cls._instance = cls(**kwargs)
+        return cls._instance
+    
     
     def preprocess_audio(self, audio_path: str, target_sr: int = 16000) -> str:
         """오디오 전처리 (WAV 우선, MP4/MP3 지원)"""
@@ -155,11 +181,19 @@ class SpeakerDiarizer:
                 os.unlink(processed_audio)
     
     def diarize_with_pyannote(self, audio_path: str) -> List[Dict]:
-        """pyannote를 사용한 화자분리"""
+        """pyannote를 사용한 화자분리 (GPU 지원)"""
         if not self.use_pyannote:
             raise RuntimeError("pyannote not available")
         
         try:
+            # 🔧 GPU 디바이스 확인
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            print(f"🔧 Using device: {device}")
+            
+            # 파이프라인을 GPU로 이동
+            if torch.cuda.is_available():
+                self.pipeline = self.pipeline.to(device)
+            
             print(" pyannote로 화자분리 수행 중...")
             
             # ✅ 기본 파라미터만 사용
@@ -341,6 +375,24 @@ class SpeakerDiarizer:
         except Exception as e:
             print(f"오디오 세그먼트 추출 실패: {e}")
             return b""
+        
+    def extract_segments_parallel(self, audio_data: bytes, segments: List[Dict]) -> List[bytes]:
+        """세그먼트 추출만 병렬 처리"""
+        import concurrent.futures
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for segment in segments:
+                future = executor.submit(
+                    self.extract_audio_segment,
+                    audio_data,
+                    segment['start_time'],
+                    segment['end_time']
+                )
+                futures.append(future)
+            
+            results = [future.result() for future in futures]
+        return results
 
 
 def download_audio_from_gcs(gcs_url: str) -> bytes:
@@ -388,6 +440,7 @@ def download_audio_from_gcs(gcs_url: str) -> bytes:
     except Exception as e:
         print(f"❌ GCS 오디오 다운로드 실패: {e}")
         raise HTTPException(status_code=400, detail=f"GCS 오디오 다운로드 실패: {e}")
+
 
 def process_audio_pipeline(audio_path: str, 
                           token: str = "", 
